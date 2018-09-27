@@ -1,0 +1,10 @@
+---
+#  defaults for role helm_deploy
+
+helm_chart_loc: .
+helm_host: localhost
+helm_repository: "https://kubernetes-charts.storage.googleapis.com"
+helm_charts: []
+
+helm_script_dest: /opt/bin
+charts_to_remove: []

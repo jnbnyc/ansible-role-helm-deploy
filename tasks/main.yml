@@ -1,0 +1,106 @@
+---
+
+# - "{{ kube_enabled_addons }}"
+- name: Ensure destination exists
+  file:
+    path: "{{ helm_script_dest }}"
+    state: directory
+
+- name: Write custom values overrides for deployment
+  copy:
+    content: "{{ item['custom_values'] | to_nice_yaml(indent=2) }}"
+    dest: "{{ helm_script_dest }}/values-{{ item.name.split('/')[1] }}.yaml"
+  register: out_custom_values
+  when: item['custom_values']
+  with_items: "{{ charts_to_deploy }}"
+- debug: msg="{{ item }}"
+# verbosity=2
+  with_items: "{{ out_custom_values.results }}"
+
+# - name: Determine if this is a new release
+#   command: helm ls {{ deploy_app_name }}
+#   register: out_helm
+# - debug: var=out_helm
+
+
+# {{ helm_chart }} {{ helm_install_flags | default('') }}
+# - name: Write deployment script
+#   template:
+#     src: deploy.sh
+#     dest: "{{helm_script_dest}}/helm_deploy"
+#     mode: "u=rwx,g=r,o=r"
+
+
+# helm upgrade [RELEASE] [CHART] [flags]
+# {{helm_script_dest}}/helm_deploy
+# --debug --dry-run
+- name: Do Helm deployment
+  command: "helm upgrade --tiller-namespace {{ helm_tiller_namespace }}
+    --install {{ item.item.name.split('/')[1] }}
+    {%if item.dest is defined %}
+      -f {{ item['dest'] }}
+    {%endif%}
+    {{item.item.name}}
+    {%if item.item.namespace is defined and item.item.namespace != ''%}
+      --namespace {{item.item.namespace}}
+    {%endif%}"
+  register: out_helm
+  # when:
+  with_items: "{{out_custom_values.results}}"
+- debug: msg="{{item}}"
+# .item.stderr_lines|default('')}}{{item.stdout_lines|default('')}}"
+  with_items: "{{out_helm.results}}"
+# stderr_lines
+# stdout_lines
+# - name: Monitor release rollout
+#   command: helm status {{ deploy_app_name }}
+#   # until:
+
+  # environment is determined by inventory or current-context from a provided kubeconfig
+  # namespace needs to always be defined
+
+#   register: out_helm_deploy
+#   when: (item.key in stale_rcs) or (item.key in forced_roll | default([])) or (forced_roll_all is defined and forced_roll_all )
+# do when item is stale, when item is specified to force_roll, or when forced_roll_all
+#   with_dict: helm_enabled_services
+#   tags: helm_deploy
+
+# how do I determine if Ansible should carry out an action if I do not know how to do the comparison or determine the outcome????
+
+
+# using command with pipes(|) do not work
+- name: Helm | find things to remove
+  shell: "helm ls --tiller-namespace {{ helm_tiller_namespace }}
+    {{ item.name.split('/')[1] }} | grep {{ item.name.split('/')[1] }}"
+  when: charts_to_remove != []
+  with_items:  "{{ charts_to_remove }}"
+  ignore_errors: yes
+  register: out_helm_del_status
+  tags:
+    - helm_remove
+
+- debug: msg="{{ item }}"
+  verbosity: 2
+  with_items: "{{ out_helm_del_status.results }}"
+  when: out_helm_del_status is defined
+  tags:
+    - helm_remove
+
+# helm delete is not idempotent as when ran twice helm will exit with error stating that release has already been removed
+- name: Helm | do removal
+  command: "helm delete --tiller-namespace {{ helm_tiller_namespace }}
+    --purge {{ item.item.name.split('/')[1] }}"
+  register: out_helm_remove
+  # when: charts_to_remove != []
+  # with_items: "{{charts_to_remove}}"
+  when: (item.stdout != "") and (item.item not in charts_to_deploy)
+  with_items: "{{ out_helm_del_status.results }}"
+  tags:
+    - helm_remove
+
+- debug: msg="{{ item }}"
+  with_items: "{{ out_helm_remove.results }}"
+  when: out_helm_remove is defined
+  # verbosity: 2
+  tags:
+    - helm_remove
